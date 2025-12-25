@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Invoice Items OCR (Unit Price Only)</title>
+
+  <!-- PDF.js (for PDF -> images) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.js"></script>
+  <!-- Tesseract.js (OCR) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#07101e; --card:#0b1730; --card2:#0b1f3f; --txt:#e9f1ff; --muted:#a9b9d6;
+      --ok:#2de07a; --warn:#ffcc66; --bad:#ff5a68; --btn:#0f2b58; --btn2:#173a77; --br:#0f2a52;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1200px 600px at 80% 0%, #112a55 0%, var(--bg) 55%);
+      color:var(--txt); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    .wrap{max-width:1100px;margin:0 auto;padding:14px 12px 24px}
+    .top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+    .title{font-size:18px;font-weight:800}
+    .sub{font-size:12px;color:var(--muted)}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    button{
+      border:1px solid var(--br); background:linear-gradient(180deg,var(--btn2),var(--btn));
+      color:var(--txt); padding:10px 12px;border-radius:12px; cursor:pointer; font-weight:700;
+      box-shadow:0 8px 20px rgba(0,0,0,.25);
+    }
+    button:active{transform:translateY(1px)}
+    button.secondary{background:linear-gradient(180deg,#202a3a,#141a26);border-color:#2b3751}
+    button.danger{background:linear-gradient(180deg,#52202a,#2a1016);border-color:#7a2a35}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .pill{padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:12px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-top:12px}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+      border:1px solid rgba(255,255,255,.08); border-radius:16px;padding:12px}
+    .h{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .h .t{font-weight:800}
+    .hint{font-size:12px;color:var(--muted);line-height:1.4}
+    .statusRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .badge{font-size:12px;padding:8px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05)}
+    .badge.ok{border-color:rgba(45,224,122,.25); color:#bff7d6}
+    .badge.warn{border-color:rgba(255,204,102,.25); color:#ffe2a6}
+    .badge.bad{border-color:rgba(255,90,104,.25); color:#ffd1d6}
+    .previewBox{background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.08);border-radius:14px;overflow:hidden;min-height:220px;display:flex;align-items:center;justify-content:center}
+    .previewBox img{max-width:100%;height:auto;display:block}
+    .files{margin-top:10px;display:grid;gap:8px}
+    .fileRow{display:flex;gap:10px;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.06); border-radius:12px;padding:10px}
+    .fileRow .meta{display:flex;flex-direction:column;gap:2px}
+    .fileRow .name{font-size:12px;color:var(--txt);word-break:break-all}
+    .fileRow .small{font-size:11px;color:var(--muted)}
+    .tbl{width:100%;border-collapse:collapse;margin-top:10px;overflow:hidden;border-radius:14px}
+    .tbl th,.tbl td{border-bottom:1px solid rgba(255,255,255,.08);padding:10px 8px;font-size:12px;text-align:right;vertical-align:top}
+    .tbl th{color:var(--muted);font-weight:800}
+    .actions a{color:#cfe2ff;text-decoration:none;font-weight:800}
+    .actions a:hover{text-decoration:underline}
+    input[type="text"]{
+      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.25);color:var(--txt);outline:none
+    }
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media(max-width:700px){.two{grid-template-columns:1fr}}
+    .progress{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+    .progress > div{height:100%;width:0%;background:linear-gradient(90deg, #2de07a, #7cc7ff)}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    .smallNote{font-size:11px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div>
+      <div class="title">Invoice Items OCR (اسم المنتج + سعر القطعة فقط)</div>
+      <div class="sub">يدعم: صور متعددة + PDF متعدد الصفحات — على Android/iPad/PC</div>
+    </div>
+
+    <div class="bar">
+      <span class="pill" id="pillCount">عدد الملفات: 0</span>
+      <button id="btnReset" class="danger">Reset</button>
+      <button id="btnScan" disabled>Scan & Save</button>
+      <button id="btnCam">كاميرا</button>
+      <button id="btnImg">إضافة صور</button>
+      <button id="btnPdf">إضافة PDF</button>
+    </div>
+  </div>
+
+  <!-- hidden file input (ONE input to avoid Android issues) -->
+  <input id="fileInput" type="file" style="display:none" multiple />
+
+  <div class="grid">
+    <div class="card">
+      <div class="h">
+        <div class="t">1) الملفات + المعاينة</div>
+        <div class="pill" id="ocrLang">OCR: de+en</div>
+      </div>
+
+      <div class="previewBox" id="previewBox">
+        <div class="hint">اضغط “إضافة صور” أو “PDF” أو “كاميرا”.<br/>أفضل نتيجة: صورة قريبة + ضوء قوي + بدون ميلان.</div>
+      </div>
+
+      <div class="statusRow">
+        <div class="badge ok" id="stReady">✅ جاهز</div>
+        <div class="badge warn" id="stPdf">⚠️ PDF.js</div>
+        <div class="badge warn" id="stOcr">⚠️ Tesseract</div>
+      </div>
+
+      <div class="files" id="filesList"></div>
+
+      <div style="margin-top:10px">
+        <div class="progress"><div id="progBar"></div></div>
+        <div class="smallNote mono" id="progText">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="h">
+        <div class="t">2) النتائج + البحث + التصدير</div>
+        <div class="pill" id="itemsCount">0 منتجات</div>
+      </div>
+
+      <div class="two">
+        <div>
+          <div class="smallNote">Lieferant (اسم الشركة)</div>
+          <input id="inSupplier" type="text" placeholder="—" readonly>
+        </div>
+        <div>
+          <div class="smallNote">Datum (التاريخ)</div>
+          <input id="inDate" type="text" placeholder="—" readonly>
+        </div>
+        <div>
+          <div class="smallNote">Rechnungsnr / Bel-Nr (رقم الفاتورة)</div>
+          <input id="inInvNo" type="text" placeholder="—" readonly>
+        </div>
+        <div>
+          <div class="smallNote">بحث (اسم منتج / شركة / تاريخ)</div>
+          <input id="inSearch" type="text" placeholder="اكتب للبحث...">
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button id="btnExportCsv" class="secondary" disabled>Export CSV</button>
+        <button id="btnExportJson" class="secondary" disabled>Export JSON</button>
+        <button id="btnDownloadPdf" class="secondary" disabled>Download PDF (كل الصفحات)</button>
+      </div>
+
+      <table class="tbl" id="tbl">
+        <thead>
+          <tr>
+            <th style="width:60px">صفحة</th>
+            <th>المنتج</th>
+            <th style="width:70px">g/L</th>
+            <th style="width:90px">سعر القطعة</th>
+            <th style="width:80px">الحالة</th>
+            <th style="width:140px">أوامر</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="6" class="hint">اضغط Scan &amp; Save بعد إضافة الملفات.</td></tr>
+        </tbody>
+      </table>
+
+      <details style="margin-top:10px">
+        <summary class="pill" style="cursor:pointer">Raw OCR (للتشخيص)</summary>
+        <pre id="rawBox" class="mono" style="white-space:pre-wrap;color:#d7e6ff;background:rgba(0,0,0,.25);padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.08)"></pre>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ====== State ======
+  const state = {
+    files: [],            // {kind:'image'|'pdf', file, name, size, pages?: [dataURL], pageMeta?: []}
+    pages: [],            // flat: {pageIndex, sourceIndex, sourceKind, dataURL, fileName, pdfPageNo?}
+    items: [],            // {page, name, unitGL, unitPrice, status, confName, confPrice, pageKey}
+    supplier: "",
+    date: "",
+    invoiceNo: "",
+  };
+
+  // ====== DOM ======
+  const el = (id) => document.getElementById(id);
+  const fileInput = el("fileInput");
+  const btnReset = el("btnReset");
+  const btnScan = el("btnScan");
+  const btnCam = el("btnCam");
+  const btnImg = el("btnImg");
+  const btnPdf = el("btnPdf");
+  const pillCount = el("pillCount");
+  const previewBox = el("previewBox");
+  const filesList = el("filesList");
+  const progBar = el("progBar");
+  const progText = el("progText");
+  const stPdf = el("stPdf");
+  const stOcr = el("stOcr");
+  const inSupplier = el("inSupplier");
+  const inDate = el("inDate");
+  const inInvNo = el("inInvNo");
+  const inSearch = el("inSearch");
+  const itemsCount = el("itemsCount");
+  const tbody = el("tbody");
+  const rawBox = el("rawBox");
+  const btnExportCsv = el("btnExportCsv");
+  const btnExportJson = el("btnExportJson");
+  const btnDownloadPdf = el("btnDownloadPdf");
+
+  // ====== Checks (CDN loaded?) ======
+  const hasPdfJs = !!(window.pdfjsLib && window.pdfjsLib.getDocument);
+  const hasTess = !!(window.Tesseract && window.Tesseract.createWorker);
+  stPdf.textContent = hasPdfJs ? "✅ PDF.js جاهز" : "⚠️ PDF.js غير جاهز (تأكد من النت)";
+  stPdf.className = "badge " + (hasPdfJs ? "ok" : "warn");
+  stOcr.textContent = hasTess ? "✅ OCR جاهز" : "⚠️ OCR غير جاهز (تأكد من النت)";
+  stOcr.className = "badge " + (hasTess ? "ok" : "warn");
+
+  // ====== Helpers ======
+  function bytes(n){
+    if(!n && n!==0) return "";
+    const u=["B","KB","MB","GB"]; let i=0; let x=n;
+    while(x>=1024 && i<u.length-1){x/=1024;i++}
+    return `${x.toFixed(i?1:0)} ${u[i]}`;
+  }
+  function setProgress(p, text){
+    progBar.style.width = `${Math.max(0,Math.min(100,p))}%`;
+    progText.textContent = text || "—";
+  }
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  }
+  function fileToDataURL(file){
+    return new Promise((resolve, reject)=>{
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  function renderFilesUI(){
+    pillCount.textContent = `عدد الملفات: ${state.files.length}`;
+    filesList.innerHTML = "";
+    const firstPage = state.pages[0]?.dataURL;
+    if(firstPage){
+      previewBox.innerHTML = `<img alt="preview" src="${firstPage}">`;
+    }else{
+      previewBox.innerHTML = `<div class="hint">اضغط “إضافة صور” أو “PDF” أو “كاميرا”.</div>`;
+    }
+
+    state.files.forEach((f, idx)=>{
+      const row = document.createElement("div");
+      row.className = "fileRow";
+      row.innerHTML = `
+        <div class="meta">
+          <div class="name">${f.name}</div>
+          <div class="small">${f.kind.toUpperCase()} • ${bytes(f.size)}</div>
+        </div>
+        <button class="secondary" data-del="${idx}">حذف</button>
+      `;
+      row.querySelector("[data-del]").addEventListener("click", ()=>{
+        state.files.splice(idx,1);
+        rebuildPages();
+        renderFilesUI();
+        updateButtons();
+      });
+      filesList.appendChild(row);
+    });
+  }
+
+  function updateButtons(){
+    const hasAny = state.files.length > 0;
+    btnScan.disabled = !hasAny || !hasTess;
+    btnExportCsv.disabled = state.items.length === 0;
+    btnExportJson.disabled = state.items.length === 0;
+    btnDownloadPdf.disabled = state.pages.length === 0;
+  }
+
+  function rebuildPages(){
+    // Flatten pages from images and PDFs
+    state.pages = [];
+    state.files.forEach((f, sourceIndex)=>{
+      if(f.kind === "image"){
+        // each image file becomes one page
+        // we already store dataURL in f.pages[0]
+        if(f.pages?.[0]){
+          state.pages.push({
+            pageIndex: state.pages.length + 1,
+            sourceIndex, sourceKind: "image",
+            dataURL: f.pages[0],
+            fileName: f.name,
+            pdfPageNo: null
+          });
+        }
+      } else if(f.kind === "pdf"){
+        if(Array.isArray(f.pages)){
+          f.pages.forEach((dataURL, pdfPageNo)=>{
+            state.pages.push({
+              pageIndex: state.pages.length + 1,
+              sourceIndex, sourceKind: "pdf",
+              dataURL,
+              fileName: f.name,
+              pdfPageNo: pdfPageNo + 1
+            });
+          });
+        }
+      }
+    });
+    // update preview
+    const firstPage = state.pages[0]?.dataURL;
+    if(firstPage){
+      previewBox.innerHTML = `<img alt="preview" src="${firstPage}">`;
+    }
+    btnDownloadPdf.disabled = state.pages.length === 0;
+  }
+
+  async function addImageFiles(files, sourceLabel){
+    const list = Array.from(files || []).filter(f => /^image\//i.test(f.type));
+    if(!list.length) return;
+
+    setProgress(5, `استلام ${list.length} صورة...`);
+    for(let i=0;i<list.length;i++){
+      const f = list[i];
+      const dataURL = await fileToDataURL(f);
+      state.files.push({kind:"image", file:f, name:f.name || `image_${Date.now()}_${i}.jpg`, size:f.size, pages:[dataURL], source:sourceLabel});
+      setProgress(5 + Math.round((i+1)/list.length*20), `تمت إضافة ${i+1}/${list.length} صور`);
+    }
+    rebuildPages();
+    renderFilesUI();
+    setProgress(30, `✅ تم استلام ${list.length} ملفات من "${sourceLabel}"`);
+    updateButtons();
+  }
+
+  async function addPdfFiles(files){
+    const list = Array.from(files || []).filter(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+    if(!list.length) return;
+
+    if(!hasPdfJs){
+      alert("PDF.js غير جاهز. افتح الصفحة مع إنترنت أو جرّب صور بدل PDF.");
+      return;
+    }
+
+    // Configure pdf.js worker
+    // (CDN sets workerSrc sometimes, but on some devices it needs explicit)
+    try{
+      if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.worker.min.js";
+      }
+    }catch(e){}
+
+    setProgress(5, `استلام ${list.length} PDF...`);
+    for(let i=0;i<list.length;i++){
+      const f = list[i];
+      const ab = await f.arrayBuffer();
+      setProgress(10, `تحويل صفحات PDF: ${f.name}`);
+
+      const pdf = await pdfjsLib.getDocument({data: ab}).promise;
+      const pages = [];
+      const maxPages = pdf.numPages; // full
+      for(let p=1;p<=maxPages;p++){
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({scale: 2.0}); // decent quality
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", {willReadFrequently:true});
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await page.render({canvasContext: ctx, viewport}).promise;
+        const dataURL = canvas.toDataURL("image/jpeg", 0.92);
+        pages.push(dataURL);
+        setProgress(10 + Math.round((p/maxPages)*25), `PDF صفحة ${p}/${maxPages}`);
+      }
+      state.files.push({kind:"pdf", file:f, name:f.name || `pdf_${Date.now()}_${i}.pdf`, size:f.size, pages});
+      setProgress(40, `✅ تم إضافة PDF: ${f.name} (${pages.length} صفحات)`);
+    }
+
+    rebuildPages();
+    renderFilesUI();
+    updateButtons();
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function normalizeName(name){
+    let s = (name||"").trim();
+
+    // Remove obvious article numbers / noisy tokens
+    s = s.replace(/\bAr\.?\s*-\s*Nr\.?\b/gi, "");
+    s = s.replace(/\bArtikel\s*Nr\.?\b/gi, "");
+    s = s.replace(/\bArNr\b/gi, "");
+    s = s.replace(/\b\d{4,}\b/g, (m)=> m.length>=6 ? "" : m); // remove long numbers
+    s = s.replace(/\s{2,}/g, " ").trim();
+
+    // remove trailing dots/commas
+    s = s.replace(/[.,;:]+$/g,"").trim();
+
+    // if too short, ignore
+    if(s.length < 3) return "";
+    return s;
+  }
+
+  function parseGermanDate(text){
+    // 16.10.2025 or 16-10-2025
+    const m = text.match(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/);
+    if(!m) return "";
+    const dd = m[1].padStart(2,"0");
+    const mm = m[2].padStart(2,"0");
+    let yy = m[3]; if(yy.length===2) yy = "20"+yy;
+    return `${dd}.${mm}.${yy}`;
+  }
+
+  function findHeaderFields(ocrText){
+    // Try to extract: supplier, date, invoice no
+    const t = ocrText;
+
+    // supplier: take first strong uppercase brand-like line before "Rechnung"
+    // fallback: first line
+    const lines = t.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    let supplier = "";
+    for(const ln of lines.slice(0,30)){
+      if(/Rechnung/i.test(ln)) break;
+      if(/[A-ZÄÖÜ]{3,}/.test(ln) && ln.length>6){
+        supplier = ln;
+        if(/GMBH|UG|KG|OHG|HANDEL|GROßHANDEL/i.test(ln)) break;
+      }
+    }
+    if(!supplier && lines[0]) supplier = lines[0];
+
+    // date
+    let date = "";
+    for(const ln of lines.slice(0,60)){
+      const d = parseGermanDate(ln);
+      if(d){ date = d; break; }
+    }
+
+    // invoice no: Rechnungsnr / Bel-Nr
+    let inv = "";
+    for(const ln of lines.slice(0,80)){
+      const m = ln.match(/(Rechnungsnr|Rechnung\s*Nr|Bel\-?Nr|Beleg\-?Nr)\s*[:.]?\s*([A-Z0-9\-\/]{4,})/i);
+      if(m){ inv = m[2]; break; }
+    }
+    // fallback: any long number near Bel-Nr
+    if(!inv){
+      for(const ln of lines.slice(0,80)){
+        if(/Bel/i.test(ln) || /Beleg/i.test(ln)){
+          const m = ln.match(/\b(\d{6,})\b/);
+          if(m){ inv=m[1]; break; }
+        }
+      }
+    }
+
+    return {supplier, date, inv};
+  }
+
+  function parseItemsFromOcr(ocrText){
+    // Goal: Items from invoice table
+    // We try to find lines after header containing: Artikel-Name + Verk-Preis
+    const lines = ocrText.split(/\r?\n/).map(x=>x.replace(/\s{2,}/g," ").trim()).filter(Boolean);
+
+    // Find header index where "Verk" appears
+    let headerIdx = -1;
+    for(let i=0;i<lines.length;i++){
+      if(/Verk/i.test(lines[i]) && /Preis/i.test(lines[i])){ headerIdx = i; break; }
+      if(/Verk-?Preis/i.test(lines[i])){ headerIdx = i; break; }
+    }
+
+    // We will parse from headerIdx+1 down until "Netto" or "Summe" or "MwSt" etc.
+    const stopRe = /(Netto|Summe|MwSt|Mehrwertsteuer|Rechnungsbetrag|Gesamt\s*EUR|Zahlungsart|Seite\s+\d+)/i;
+
+    const out = [];
+    const start = headerIdx>=0 ? headerIdx+1 : 0;
+
+    for(let i=start; i<lines.length; i++){
+      const ln = lines[i];
+      if(stopRe.test(ln)) break;
+
+      // Skip empty/noise
+      if(/^\d+([.,]\d+)?$/.test(ln)) continue;
+
+      // PRICE extraction (unit price):
+      // German uses comma: 12,1900 or 56,6700 or 6,00
+      // We want the last "price-like" token but NOT "Gesamt" column confusion:
+      // We'll accept price only if line contains ONE price and NOT two prices (unit+total).
+      const priceTokens = ln.match(/\b\d{1,3}(?:[.\s]?\d{3})*[.,]\d{2,4}\b/g) || [];
+      if(priceTokens.length === 0) continue;
+
+      // Heuristic: if 2+ prices, likely has unit+total; prefer the one near "Verk-Preis" column -> often second last.
+      // But user wants unit price only: choose the first of last two? Actually invoice table has columns: ... Menge | Verk-Preis | Gesamt
+      // In OCR line, order often ends with "... <unit> <total>" -> choose the FIRST of the last two (unit).
+      let unitPrice = "";
+      if(priceTokens.length >= 2){
+        unitPrice = priceTokens[priceTokens.length - 2];
+      } else {
+        unitPrice = priceTokens[0];
+      }
+
+      // Remove price tokens from name
+      let namePart = ln;
+      for(const tok of priceTokens) namePart = namePart.replace(tok, " ");
+
+      // Remove obvious quantities/columns (koli, k-inhalt, menge, etc)
+      namePart = namePart
+        .replace(/\b\d+\b/g, " ")
+        .replace(/\b(Ar\-?Nr|Menge|Koli|K\-?Inhalt|Gesamt|EUR)\b/gi, " ")
+        .replace(/\s{2,}/g," ")
+        .trim();
+
+      // Extract g/L only if very sure
+      let unitGL = "";
+      const gl = ln.match(/\b(\d+(?:[.,]\d+)?)\s*(g|G|l|L)\b/);
+      if(gl){
+        // only keep if unit is exactly g/L and number is small-ish
+        unitGL = `${gl[2].toLowerCase()} ${gl[1].replace(",",".")}`;
+      } else {
+        // also handle patterns like "0,5Liter" or "36g"
+        const gl2 = ln.match(/\b(\d+(?:[.,]\d+)?)\s*(Liter|Ltr|l)\b/i);
+        if(gl2) unitGL = `l ${gl2[1].replace(",",".")}`;
+      }
+
+      const name = normalizeName(namePart);
+      if(!name) continue;
+
+      // Clean price format
+      unitPrice = unitPrice.replace(/\s/g,"");
+      // accept only if looks valid
+      if(!/\d/.test(unitPrice)) continue;
+
+      // Extra: ignore Hülsen / OCB / Gizeh if line mostly like that? (but sometimes they are real items)
+      // We'll keep them if name length is ok.
+      out.push({name, unitGL, unitPrice});
+    }
+
+    // Remove duplicates
+    const seen = new Set();
+    return out.filter(x=>{
+      const k = (x.name+"|"+x.unitGL+"|"+x.unitPrice).toLowerCase();
+      if(seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  function renderTable(){
+    const q = (inSearch.value||"").trim().toLowerCase();
+    const rows = state.items.filter(it=>{
+      if(!q) return true;
+      return (it.name||"").toLowerCase().includes(q)
+        || (state.supplier||"").toLowerCase().includes(q)
+        || (state.date||"").toLowerCase().includes(q)
+        || (state.invoiceNo||"").toLowerCase().includes(q);
+    });
+
+    itemsCount.textContent = `${rows.length} منتجات`;
+    tbody.innerHTML = "";
+
+    if(rows.length === 0){
+      tbody.innerHTML = `<tr><td colspan="6" class="hint">لا نتائج.</td></tr>`;
+      return;
+    }
+
+    for(const it of rows){
+      const tr = document.createElement("tr");
+      const statusClass = it.status === "OK" ? "ok" : (it.status === "Best-effort" ? "warn" : "bad");
+      const statusTxt = it.status || "OK";
+
+      tr.innerHTML = `
+        <td>${it.page}</td>
+        <td>${escapeHtml(it.name)}</td>
+        <td>${escapeHtml(it.unitGL || "")}</td>
+        <td>${escapeHtml(it.unitPrice || "")}</td>
+        <td><span class="badge ${statusClass}">${escapeHtml(statusTxt)}</span></td>
+        <td class="actions">
+          <a href="#" data-prev="${it.pageKey}">معاينة</a>
+          &nbsp;|&nbsp;
+          <a href="#" data-print-page="${it.pageKey}">طباعة الصفحة</a>
+          &nbsp;|&nbsp;
+          <a href="#" data-print-inv="${it.pageKey}">طباعة الفاتورة</a>
+        </td>
+      `;
+
+      // Preview
+      tr.querySelector(`[data-prev]`).addEventListener("click",(e)=>{
+        e.preventDefault();
+        const page = state.pages.find(p => p.pageIndex === it.page);
+        if(page){
+          previewBox.innerHTML = `<img alt="preview" src="${page.dataURL}">`;
+          window.scrollTo({top:0, behavior:"smooth"});
+        }
+      });
+
+      // Print page
+      tr.querySelector(`[data-print-page]`).addEventListener("click",(e)=>{
+        e.preventDefault();
+        const page = state.pages.find(p => p.pageIndex === it.page);
+        if(!page) return;
+        const w = window.open("");
+        const html = `
+          <html><head><title>Print Page</title>
+          <style>body{margin:0}img{max-width:100%;width:100%;height:auto;display:block}</style>
+          </head><body>
+          <img src="${page.dataURL}"/>
+          <script>setTimeout(()=>{window.print();},200);</script>
+          </body></html>`;
+        w.document.open(); w.document.write(html); w.document.close();
+      });
+
+      // Print invoice (all pages from same source file)
+      tr.querySelector(`[data-print-inv]`).addEventListener("click",(e)=>{
+        e.preventDefault();
+        const page = state.pages.find(p => p.pageIndex === it.page);
+        if(!page) return;
+        const sourceIndex = page.sourceIndex;
+        const allPages = state.pages.filter(p => p.sourceIndex === sourceIndex)
+          .sort((a,b)=>a.pageIndex-b.pageIndex);
+
+        const w = window.open("");
+        const imgs = allPages.map(p=>`<img src="${p.dataURL}"/>`).join("");
+        const html = `
+          <html><head><title>Print Invoice</title>
+          <style>body{margin:0}img{max-width:100%;width:100%;height:auto;display:block;page-break-after:always}</style>
+          </head><body>${imgs}
+          <script>setTimeout(()=>{window.print();},250);</script>
+          </body></html>`;
+        w.document.open(); w.document.write(html); w.document.close();
+      });
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  function exportCSV(){
+    const head = ["page","product","g_or_l","unit_price","status"];
+    const lines = [head.join(",")];
+    for(const it of state.items){
+      const row = [
+        it.page,
+        `"${String(it.name||"").replace(/"/g,'""')}"`,
+        `"${String(it.unitGL||"").replace(/"/g,'""')}"`,
+        `"${String(it.unitPrice||"").replace(/"/g,'""')}"`,
+        it.status || "OK"
+      ];
+      lines.push(row.join(","));
+    }
+    const csv = lines.join("\n");
+    downloadBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}), "invoice_items_unit_price.csv");
+  }
+
+  function exportJSON(){
+    const payload = {
+      supplier: state.supplier,
+      date: state.date,
+      invoiceNo: state.invoiceNo,
+      items: state.items.map(it=>({
+        page: it.page,
+        name: it.name,
+        unitGL: it.unitGL,
+        unitPrice: it.unitPrice,
+        status: it.status
+      }))
+    };
+    downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}), "invoice_items_unit_price.json");
+  }
+
+  function downloadAllPagesAsPDF(){
+    // We cannot generate real PDF easily offline without extra libs.
+    // Instead we download all pages as ZIP? (no zip lib).
+    // Simple: download a JSON with all dataURLs is huge. So:
+    // We'll download all pages as separate JPG files (one by one).
+    // (Works on Android but may prompt multiple downloads.)
+    state.pages.forEach((p, idx)=>{
+      const a = document.createElement("a");
+      a.href = p.dataURL;
+      const base = p.fileName.replace(/\.[^.]+$/,"");
+      const name = `${base}_page_${String(idx+1).padStart(2,"0")}.jpg`;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+  }
+
+  // ====== File Picker Strategy (Android-safe) ======
+  function openPicker(mode){
+    // mode: 'camera'|'images'|'pdf'
+    // MUST be called directly from click handler (user gesture) for Android
+    fileInput.value = ""; // reset so change triggers even if same file
+    fileInput.removeAttribute("capture");
+
+    if(mode === "camera"){
+      fileInput.accept = "image/*";
+      // On many Android devices: capture="environment" triggers camera
+      fileInput.setAttribute("capture","environment");
+    } else if(mode === "images"){
+      fileInput.accept = "image/*";
+    } else if(mode === "pdf"){
+      fileInput.accept = "application/pdf";
+    } else {
+      fileInput.accept = "image/*,application/pdf";
+    }
+    fileInput.click();
+    fileInput.dataset.mode = mode;
+  }
+
+  // ====== Events ======
+  btnCam.addEventListener("click", ()=> openPicker("camera"));
+  btnImg.addEventListener("click", ()=> openPicker("images"));
+  btnPdf.addEventListener("click", ()=> openPicker("pdf"));
+
+  fileInput.addEventListener("change", async ()=>{
+    try{
+      const mode = fileInput.dataset.mode || "";
+      const files = fileInput.files;
+      if(!files || !files.length){
+        setProgress(0, "لم يتم اختيار ملفات.");
+        return;
+      }
+
+      // IMPORTANT: On Android some pickers return mime type empty; we use extension too.
+      const list = Array.from(files);
+
+      // Add images
+      const img = list.filter(f => /^image\//i.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name));
+      // Add pdf
+      const pdf = list.filter(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+
+      setProgress(2, `تم اختيار ${list.length} ملفات...`);
+
+      if(img.length){
+        const sourceLabel = (mode==="camera") ? "الكاميرا" : "الاستديو";
+        await addImageFiles(img, sourceLabel);
+      }
+      if(pdf.length){
+        await addPdfFiles(pdf);
+      }
+
+      if(state.files.length === 0){
+        setProgress(0, "لم يتم إضافة أي شيء (نوع الملف غير مدعوم).");
+      } else {
+        setProgress(35, `✅ تمت الإضافة. الصفحات: ${state.pages.length}`);
+      }
+
+      updateButtons();
+    }catch(err){
+      console.error(err);
+      alert("صار خطأ أثناء الإضافة. افتح Console إذا تقدر.");
+      setProgress(0, "❌ خطأ أثناء الإضافة");
+    }
+  });
+
+  btnReset.addEventListener("click", ()=>{
+    state.files = [];
+    state.pages = [];
+    state.items = [];
+    state.supplier = ""; state.date = ""; state.invoiceNo = "";
+    inSupplier.value = ""; inDate.value = ""; inInvNo.value = "";
+    rawBox.textContent = "";
+    renderFilesUI();
+    renderTable();
+    setProgress(0, "تمت إعادة الضبط.");
+    updateButtons();
+  });
+
+  inSearch.addEventListener("input", renderTable);
+
+  btnExportCsv.addEventListener("click", exportCSV);
+  btnExportJson.addEventListener("click", exportJSON);
+  btnDownloadPdf.addEventListener("click", downloadAllPagesAsPDF);
+
+  btnScan.addEventListener("click", async ()=>{
+    if(!hasTess){ alert("OCR غير جاهز."); return; }
+    if(state.pages.length === 0){ alert("أضف صور أو PDF أولاً."); return; }
+
+    btnScan.disabled = true;
+    setProgress(0, "بدء OCR...");
+
+    // Tesseract worker
+    const worker = await Tesseract.createWorker("deu+eng");
+    try{
+      state.items = [];
+      rawBox.textContent = "";
+
+      for(let i=0;i<state.pages.length;i++){
+        const pg = state.pages[i];
+        setProgress(Math.round((i/state.pages.length)*100), `OCR صفحة ${i+1}/${state.pages.length}...`);
+
+        const { data } = await worker.recognize(pg.dataURL, { rotateAuto: true });
+
+        const text = (data.text || "").trim();
+        rawBox.textContent += `\n\n===== Page ${pg.pageIndex} (${pg.fileName}${pg.pdfPageNo?(" / PDF#"+pg.pdfPageNo):""}) =====\n` + text;
+
+        // Header fields (supplier/date/invoice) from first page only
+        if(i===0){
+          const hdr = findHeaderFields(text);
+          state.supplier = hdr.supplier || "";
+          state.date = hdr.date || "";
+          state.invoiceNo = hdr.inv || "";
+          inSupplier.value = state.supplier || "—";
+          inDate.value = state.date || "—";
+          inInvNo.value = state.invoiceNo || "—";
+        }
+
+        // Parse items
+        const parsed = parseItemsFromOcr(text);
+
+        for(const it of parsed){
+          // confidence gating: we DON'T have per-token confidence easily from Tesseract text mode here.
+          // We'll mark as OK, but if price looks suspicious (e.g., many digits) mark Best-effort.
+          let status = "OK";
+          const p = it.unitPrice;
+          // suspicious: if looks like quantity (e.g., 1,00) and line had multiple numbers -> sometimes Menge mix
+          if(/\b0,00\b/.test(p) || /\b1,00\b/.test(p) || /\b2,00\b/.test(p)){
+            status = "Best-effort";
+          }
+          // If name contains almost only short tokens -> best-effort
+          if(it.name.split(/\s+/).length <= 1) status = "Best-effort";
+
+          state.items.push({
+            page: pg.pageIndex,
+            pageKey: `${pg.sourceIndex}_${pg.pageIndex}`,
+            name: it.name,
+            unitGL: it.unitGL,
+            unitPrice: it.unitPrice,
+            status
+          });
+        }
+      }
+
+      setProgress(100, `✅ انتهى OCR — منتجات: ${state.items.length}`);
+      itemsCount.textContent = `${state.items.length} منتجات`;
+      updateButtons();
+      renderTable();
+    }catch(err){
+      console.error(err);
+      alert("صار خطأ أثناء OCR (ممكن RAM أو الملف كبير). جرّب صفحات أقل.");
+      setProgress(0, "❌ خطأ أثناء OCR");
+    }finally{
+      await worker.terminate();
+      btnScan.disabled = state.files.length === 0;
+    }
+  });
+
+  // Initial UI
+  renderFilesUI();
+  renderTable();
+  updateButtons();
+  setProgress(0, "جاهز.");
+})();
+</script>
+</body>
+</html>
+```0
